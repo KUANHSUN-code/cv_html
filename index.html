@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>小洪的個人經歷遊覽</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #2c3e50;
+        }
+
+        #game-container {
+            position: relative;
+            width: 1000px;
+            height: 700px;
+            background-color: #64b5f6; 
+            border: 5px solid #34495e;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #enter-prompt {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            display: none;
+            pointer-events: none;
+            transform: translate(-50%, -100%);
+            transition: top 0.1s, left 0.1s;
+            z-index: 10;
+        }
+
+        #dialogue-box {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            background: rgba(15, 20, 30, 0.85);
+            color: #ecf0f1;
+            padding: 25px;
+            border-radius: 12px;
+            border: 1px solid #3498db;
+            display: none;
+            font-family: "微軟正黑體", sans-serif;
+            font-size: 18px;
+            line-height: 1.6;
+            box-shadow: 0 0 15px rgba(52, 152, 219, 0.5);
+            z-index: 20;
+        }
+
+        .hint {
+            font-size: 14px;
+            color: #95a5a6;
+            margin-top: 15px;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="1000" height="700"></canvas>
+        <div id="enter-prompt">按 Enter 進入</div>
+        <div id="dialogue-box">
+            <div id="dialogue-text">文本內容</div>
+            <div class="hint">▶ 按 Backspace 關閉</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const enterPrompt = document.getElementById('enter-prompt');
+        const dialogueBox = document.getElementById('dialogue-box');
+        const dialogueText = document.getElementById('dialogue-text');
+
+        // 載入圖片資源 (路徑已統一加上 picture/ 資料夾)
+        const shipImg = new Image(); shipImg.src = 'picture/boat1.png';
+        const uniImg = new Image(); uniImg.src = 'picture/college.png';
+        const homeImg = new Image(); homeImg.src = 'picture/home1.png'; 
+        const labImg = new Image(); labImg.src = 'picture/lab1.png';
+        
+        const rockImg = new Image(); rockImg.src = 'picture/rock01_2.png';
+        const waveImg = new Image(); waveImg.src = 'picture/waves_2.png';
+
+        let gameState = 'PLAYING'; 
+        let edgeHitFlag = false;   
+
+        const ship = {
+            x: 500, y: 350, width: 80, height: 80, speed: 3, direction: 'left' // 預設朝左
+        };
+
+        // 按鍵追蹤 (支援大小寫 WASD、和 Arrow)
+        const keys = {
+            w: false, a: false, s: false, d: false,
+            W: false, A: false, S: false, D: false,
+            ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false
+        };
+
+        const landmarks = [
+            { id: 'uni', x: 150, y: 150, w: 120, h: 120, img: uniImg, name: '大學', text: '這裡是知識的學術島嶼！小洪在大學殿堂裡鍛鍊邏輯思考，從各種挑戰與專案中累積實力，準備好揚帆啟航。' },
+            { id: 'home', x: 750, y: 200, w: 120, h: 120, img: homeImg, name: '住家', text: '歡迎來到小洪的家！這裡是小洪成長的避風港，孕育了他對世界充滿好奇的性格，也為未來的偉大航道打下了堅實的基礎。' },
+            { id: 'lab', x: 450, y: 500, w: 120, h: 120, img: labImg, name: '實驗室', text: '歡迎來到實作坊！小洪在這裡敲打鍵盤、連接電路，把抽象的點子化為真實的程式碼與硬體成果，是冒險中最強大的武器庫。' }
+        ];
+
+        const rocks = [
+            { x: 350, y: 250, w: 80, h: 80, img: rockImg },
+            { x: 800, y: 500, w: 80, h: 80, img: rockImg }
+        ];
+
+        const waves = [
+            { x: 200, y: 400, w: 150, h: 90, img: waveImg },
+            { x: 650, y: 100, w: 150, h: 90, img: waveImg }
+        ];
+
+        // 監聽鍵盤按下
+        window.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.key)) {
+                keys[e.key] = true;
+            }
+            if (e.key === 'Enter' && gameState === 'PLAYING' && currentNearbyLandmark) {
+                openDialogue(currentNearbyLandmark.text);
+            }
+            if (e.key === 'Backspace' && gameState === 'DIALOGUE') {
+                closeDialogue();
+            }
+        });
+
+        // 監聽鍵盤放開
+        window.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.key)) {
+                keys[e.key] = false;
+            }
+        });
+
+        let currentNearbyLandmark = null;
+
+        function openDialogue(text) {
+            gameState = 'DIALOGUE';
+            dialogueText.innerHTML = text;
+            dialogueBox.style.display = 'block';
+            enterPrompt.style.display = 'none'; 
+        }
+
+        function closeDialogue() {
+            gameState = 'PLAYING';
+            dialogueBox.style.display = 'none';
+        }
+
+        function checkIntersections() {
+            let nextX = ship.x;
+            let nextY = ship.y;
+
+            // X 軸移動判定 (支援大小寫 WASD 與方向鍵，精準對調並重置方向旗標)
+            if (keys.a || keys.A || keys.ArrowLeft) { 
+                nextX -= ship.speed; 
+                ship.direction = 'left'; // 往左走，設定向左
+            } else if (keys.d || keys.D || keys.ArrowRight) { 
+                nextX += ship.speed; 
+                ship.direction = 'right'; // 往右走，設定向右
+            }
+
+            // Y 軸移動判定
+            if (keys.w || keys.W || keys.ArrowUp) {
+                nextY -= ship.speed;
+            } else if (keys.s || keys.S || keys.ArrowDown) {
+                nextY += ship.speed;
+            }
+
+            // 1. 檢查邊緣碰撞 (撞到阻擋位置，並解發對話)
+            let hitEdge = false;
+            if (nextX < 0) { nextX = 0; hitEdge = true; }
+            if (nextX + ship.width > canvas.width) { nextX = canvas.width - ship.width; hitEdge = true; }
+            if (nextY < 0) { nextY = 0; hitEdge = true; }
+            if (nextY + ship.height > canvas.height) { nextY = canvas.height - ship.height; hitEdge = true; }
+
+            if (hitEdge) {
+                if (!edgeHitFlag && gameState === 'PLAYING') {
+                    openDialogue("前方海域尚未探索（網頁持續開發中）！");
+                    edgeHitFlag = true; 
+                }
+            } else {
+                edgeHitFlag = false; 
+            }
+
+            // 2. 獨立檢查 X 軸與 Y 軸的礁石碰撞 (讓船可以滑行，而非死當)
+            let canMoveX = true;
+            let canMoveY = true;
+
+            for (let r of rocks) {
+                if (nextX < r.x + r.w && nextX + ship.width > r.x &&
+                    ship.y < r.y + r.h && ship.y + ship.height > r.y) {
+                    canMoveX = false;
+                }
+                if (ship.x < r.x + r.w && ship.x + ship.width > r.x &&
+                    nextY < r.y + r.h && nextY + ship.height > r.y) {
+                    canMoveY = false;
+                }
+            }
+
+            // 3. 檢查靠近地標
+            currentNearbyLandmark = null;
+            let isNearAny = false;
+            for (let lm of landmarks) {
+                let sensorRange = 25;
+                if (nextX < lm.x + lm.w + sensorRange &&
+                    nextX + ship.width > lm.x - sensorRange &&
+                    nextY < lm.y + lm.h + sensorRange &&
+                    nextY + ship.height > lm.y - sensorRange) {
+                    isNearAny = true;
+                    currentNearbyLandmark = lm;
+                }
+            }
+
+            if (isNearAny && gameState === 'PLAYING') {
+                enterPrompt.style.display = 'block';
+                enterPrompt.style.left = (ship.x + ship.width / 2) + 'px';
+                enterPrompt.style.top = (ship.y - 15) + 'px';
+            } else {
+                enterPrompt.style.display = 'none';
+            }
+
+            // 更新實際座標
+            if (gameState === 'PLAYING') {
+                if (canMoveX) ship.x = nextX;
+                if (canMoveY) ship.y = nextY;
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 繪製海浪
+            for (let w of waves) {
+                if (w.img.complete && w.img.naturalWidth !== 0) {
+                    ctx.drawImage(w.img, w.x, w.y, w.w, w.h);
+                }
+            }
+
+            // 繪製礁石
+            for (let r of rocks) {
+                if (r.img.complete && r.img.naturalWidth !== 0) {
+                    ctx.drawImage(r.img, r.x, r.y, r.w, r.h);
+                } else {
+                    ctx.fillStyle = '#7f8c8d';
+                    ctx.fillRect(r.x, r.y, r.w, r.h);
+                }
+            }
+
+            // 繪製地標
+            for (let lm of landmarks) {
+                if (lm.img.complete && lm.img.naturalWidth !== 0) {
+                    ctx.drawImage(lm.img, lm.x, lm.y, lm.w, lm.h);
+                } else {
+                    ctx.fillStyle = '#95a5a6';
+                    ctx.fillRect(lm.x, lm.y, lm.w, lm.h);
+                }
+                ctx.font = 'bold 18px "微軟正黑體", Arial';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillText(lm.name, lm.x + lm.w/2 + 2, lm.y + lm.h + 22);
+                ctx.fillStyle = 'white';
+                ctx.fillText(lm.name, lm.x + lm.w/2, lm.y + lm.h + 20);
+            }
+
+            // 繪製海盜船 (修正左右翻轉邏輯，朝左 default 往右 flipped)
+            if (shipImg.complete && shipImg.naturalWidth !== 0) {
+                ctx.save(); 
+                // 當向右 (right) 行駛時，翻轉圖片
+                if (ship.direction === 'right') {
+                    ctx.translate(ship.x + ship.width, ship.y);
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(shipImg, 0, 0, ship.width, ship.height);
+                } else {
+                    // 向左 (left) 行駛，不翻轉（朝左是原圖的方向）
+                    ctx.drawImage(shipImg, ship.x, ship.y, ship.width, ship.height);
+                }
+                ctx.restore(); 
+            }
+        }
+
+        function gameLoop() {
+            checkIntersections();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop();
+    </script>
+</body>
+</html>
